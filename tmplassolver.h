@@ -1,0 +1,593 @@
+#pragma once
+
+#include<algorithm>
+#include<vector>
+#include<stdio.h>
+#include<string.h>
+#include<unordered_set>
+#include<math.h>
+#include<functional>
+#include<string>
+#include<set>
+#include<chrono>
+#include <Eigen/Dense>
+#include<iostream>
+#include"logger.h"
+
+#define epsilon 1e-8
+#define INF 1e30
+typedef double value_t;
+typedef int idx_t;
+#define unordered_set set
+#define stderr stdout
+#define ADD_CHECK_AFTER 20
+#define ADD_CHECK_AFTER_RATIO 0.75
+#define SConst 0.05
+#define LAMBDA_CONST 1
+#define LEAST_A_SIZE 50
+
+#define FIX_ADD 0
+#define ADD_B 0.5
+
+#define rank_a_multiple 4
+
+
+class Lassolver{
+public:
+	//const int m1 = 75;
+	const int m1 = 300;
+	const int m2 = 10;
+	const int b = 50;
+	const value_t r1_ratio = rank_a_multiple;
+	double lambda = 50;
+	const int k = 7;
+	const int k_interval = 10;
+
+	value_t max_xTy = 0;
+	
+	std::vector<std::vector<std::pair<int,value_t>>> col_x;
+	std::vector<value_t> y;
+	std::unordered_set<idx_t> A;
+	std::unordered_set<idx_t> R1;
+	std::unordered_set<idx_t> R2;
+	idx_t n,p;
+	bool stop_adding = false;
+	std::vector<value_t> beta[2];
+	std::vector<value_t> theta;
+	std::vector<value_t> r;
+	std::vector<value_t> xTtheta;
+
+	std::vector<value_t> x_sq_norm_2;
+	std::vector<value_t> norm_2_x;
+	value_t sq_norm_2_y_div_2n;
+
+	idx_t total_add_cnt = 0;
+	idx_t total_del_cnt = 0;
+	idx_t total_rank_cnt = 0;
+	value_t last_prime;
+	value_t last_dual;
+	double load_time;
+	double compute_time;
+	double spin_time;
+
+
+	std::vector<std::vector<value_t>> past_r;
+	std::vector<value_t> lc_theta;
+
+	void init(int num_data,int num_feature){
+		n = num_data;
+		p = num_feature;
+		col_x.resize(p);	
+		beta[0].resize(p);
+		beta[1].resize(p);
+		theta.resize(n);
+		lc_theta.resize(n);
+		r.resize(n);
+		xTtheta.resize(p);
+		x_sq_norm_2.resize(p);
+		norm_2_x.resize(p);
+		past_r.reserve(k + 1);
+	}
+
+	void update_lambda(double l){
+		stop_adding = false;
+		lambda = max_xTy * l / n;
+		const int t = m1 & 1;
+		for(int i = 0;i < n;++i){
+			r[i] = y[i];
+		}
+		for(int j = 0;j < p;++j){
+			for(const auto& idx_val : col_x[j]){
+				r[idx_val.first] -= idx_val.second * beta[t][j];
+			}
+		}
+		update_theta();
+		Logger::log(Logger::DEBUG,"lambda is changed to %f\n",lambda);
+		
+		std::vector<std::pair<value_t,int>> xTr(p);
+		for(int i = 0;i < p;++i){
+			double sum = 0;
+			for(const auto& idx_val : col_x[i]){
+				sum += idx_val.second * r[idx_val.first];
+			}
+			xTr[i].first = fabs(sum);
+			xTr[i].second = i;
+		}
+		std::sort(xTr.rbegin(),xTr.rend());
+		//int r1_size = r1_ratio * (p - A.size());
+		int r1_size = r1_ratio * A.size();
+		R1.clear();
+		R2.clear();
+		for(auto p : xTr){
+			if(A.count(p.second) != 0)
+				continue;
+			if(R1.size() < r1_size)
+				R1.insert(p.second);
+			else
+				R2.insert(p.second);
+		}
+	}
+
+	void precomputation(){
+		for(int i = 0;i < p;++i)
+			beta[0][i] = 0;
+		double sumy2 = 0;
+		for(int i = 0;i < n;++i){
+			r[i] = y[i];
+			sumy2 += y[i] * y[i];
+		}
+		sq_norm_2_y_div_2n = sumy2 / 2 / n;
+
+		max_xTy = 0;
+		std::vector<std::pair<value_t,int>> xTy(p);
+		std::vector<value_t> xTy4median;
+		xTy4median.resize(p);
+		for(int j = 0;j < p;++j){
+			value_t sum = 0;
+			value_t sumx2 = 0;
+			for(const auto& idx_val : col_x[j]){
+				sum += idx_val.second * y[idx_val.first];
+				//if(fabs(sum) > 1e30)
+				//	printf("\n");
+				sumx2 += idx_val.second * idx_val.second;
+			}
+			//if(fabs(sum) > 1e30)
+			//	printf("\n");
+			max_xTy = std::max(max_xTy,fabs(sum));
+			xTy4median[j] = fabs(sum);
+			xTy[j] = std::make_pair((1-fabs(sum))/sqrt(sumx2),j);
+			x_sq_norm_2[j] = sumx2;
+			norm_2_x[j] = sqrt(sumx2);
+		}
+		nth_element(xTy4median.begin(),xTy4median.begin() + p / 2,xTy4median.end());
+		value_t mdXY = xTy4median[p / 2];
+		lambda = max_xTy * LAMBDA_CONST / n;
+		//m1 = ceil(SConst * pow(log2(max_xTy + mdXY),1.6) * log2(p));
+		Logger::log(Logger::INFO,"using %d as m1\n",m1);
+		Logger::log(Logger::DEBUG,"lambda %f\n",lambda);
+		std::sort(xTy.begin(),xTy.end());
+		for(int i = 0;i < b;++i){
+			A.insert(xTy[i].second);
+		}
+//		int r1_end = r1_ratio * (p - b) + b;
+		int r1_end = r1_ratio * A.size() + b;
+        if(r1_end >= p)
+            r1_end = p;
+		for(int i = b;i < r1_end;++i){
+			R1.insert(xTy[i].second);
+		}
+		for(int i = r1_end;i < p;++i){
+			R2.insert(xTy[i].second);
+		}
+	}
+
+	inline bool is_zero(value_t x){
+		return fabs(x) < 1e-20;
+	}
+
+	inline value_t soft_thresholding(value_t x,value_t u){
+		if(x > u) return x - u;
+		if(x < -u) return x + u;
+		return 0;
+	} 
+
+	void subproblem_solver(){
+		Logger::log(Logger::DEBUG,"solving %zu A subproblem.\n",A.size());
+		past_r.clear();
+		for(int iter = 0;iter < m1;++iter){
+			int t = (iter & 1);
+			for(int j : A){
+				value_t xTr = 0;
+				for(const auto& idx_val : col_x[j]){
+					xTr += idx_val.second * r[idx_val.first];
+			//		Logger::log(Logger::DEBUG,"j %d performing xTr: x[%d] %e r %e\n",j,idx_val.first,idx_val.second,r[idx_val.first]);
+				}
+				//TODO: not sure which one is faster, save x_sq_norm_2 or compute it during the xTr.
+				beta[t ^ 1][j] = soft_thresholding(beta[t][j] + xTr / x_sq_norm_2[j],lambda / x_sq_norm_2[j] * n);
+			//	Logger::log(Logger::DEBUG,"beta[%d]: %f xTr %f ||x||_2^2 %f    %f %f\n",j,beta[t^1][j],xTr,x_sq_norm_2[j], beta[t][j] + xTr / x_sq_norm_2[j],lambda / x_sq_norm_2[j] * n  );
+				value_t diff = beta[t][j] - beta[t ^ 1][j];
+				//if(!is_zero(diff))
+				//	Logger::log(Logger::DEBUG,"iter %d j %d diff %e\n",iter,j,diff);
+				if(!is_zero(diff)){
+					for(const auto& idx_val : col_x[j]){
+						r[idx_val.first] += (diff) * idx_val.second;
+					}
+				}
+			}
+			if(iter >= m1 - 1 - k * k_interval && (m1 - iter - 1) % k_interval == 0){
+				past_r.push_back(r);
+			}
+		}
+		/*
+		for(int i = 0;i < r.size();++i){
+			if(fabs(r[i]) > 1e50)
+				Logger::log(Logger::DEBUG,"r %d %e\n,",i,r[i]);
+		}
+		for(int i = 0;i < beta[m1 & 1].size();++i)
+			if(fabs(beta[m1 & 1][i]) > 1e50)
+				Logger::log(Logger::DEBUG,"beta %d %e\n",i,beta[m1 & 1][i]);
+		*/
+		Logger::log(Logger::DEBUG,"done\n");
+	}
+
+	std::vector<int> add(int cnt,value_t g) const{
+		value_t tau = sqrt(2 * g) / lambda / sqrt(n);
+		Logger::log(Logger::DEBUG,"try to add %d\n",cnt);
+		if(cnt == 0){
+			Logger::log(Logger::WARN,"[WARN] skipped the attempt to add 0 elements\n");
+			return std::vector<int>();
+		}
+		std::vector<int> add_candidates;
+		std::vector<int> perm;
+		perm.reserve(R1.size());
+		for(const auto& j : R1)
+			perm.push_back(j);
+		std::sort(perm.begin(),perm.end(),[&](int a,int b){return fabs(xTtheta[a]) > fabs(xTtheta[b]);});
+//		std::sort(perm.begin(),perm.end(),[&](int a,int b){return (1-fabs(xTtheta[a]))/sqrt(x_sq_norm_2[a]) < (1-fabs(xTtheta[b]))/sqrt(x_sq_norm_2[b]);});
+		
+		if(cnt > perm.size())
+			cnt = perm.size();
+		int num_to_check = perm.size() - cnt;
+		if(num_to_check > ADD_CHECK_AFTER)
+			num_to_check = ADD_CHECK_AFTER;
+		int step = num_to_check == 0 ? 1 : (perm.size() - cnt) / num_to_check;
+		value_t bound_i = fabs(xTtheta[perm[cnt - 1]]) - sqrt(x_sq_norm_2[perm[cnt - 1]]) * tau;
+		int satisfied = 0;
+		for(int i = 0;i < num_to_check;++i){
+			int j = perm[cnt + i * step];
+			satisfied += (bound_i > (fabs(xTtheta[j]) + sqrt(x_sq_norm_2[j]) * tau));
+			Logger::log(Logger::DEBUG,"%e vs %e\n", bound_i , (fabs(xTtheta[j]) + sqrt(x_sq_norm_2[j]) * tau));
+		}
+		if(satisfied < num_to_check * ADD_CHECK_AFTER_RATIO){
+			Logger::log(Logger::DEBUG,"skipped the adding attempt since only %d constraints are satisfied out of %d\n",satisfied,num_to_check);
+			return std::vector<int>();
+		}
+		for(int i = 0;i < cnt;++i){
+			add_candidates.push_back(perm[i]);
+		}
+		return add_candidates;
+	}
+
+	std::vector<int> del(value_t g) const{
+		value_t tau = sqrt(2 * g) / lambda / sqrt(n);
+		Logger::log(Logger::DEBUG,"lambda %e tau %e sqrtn %e\n",lambda,tau,sqrt(n));
+		std::vector<int> del_candidates;
+		for(auto& j : A){
+			value_t low = xTtheta[j] - norm_2_x[j] * tau;
+			value_t high = xTtheta[j] + norm_2_x[j] * tau;
+			//Logger::log(Logger::DEBUG,"%d %e %e\n",j,low,high);
+			if(-1 <= low && high <= 1)
+				del_candidates.push_back(j);
+		}
+		Logger::log(Logger::DEBUG,"del candidate:");
+		for(auto i : del_candidates){
+			Logger::log_pure(Logger::DEBUG," %d",i);
+		}
+		Logger::log_pure(Logger::DEBUG,"\n");
+		return del_candidates;
+	}
+
+	double prime(){
+		const int t = m1 & 1;
+		std::vector<value_t> xb_sum(n,0);
+		value_t sumb = 0;
+		for(int j : A){
+			sumb += fabs(beta[t][j]);
+			for(const auto& idx_val : col_x[j])
+				xb_sum[idx_val.first] += idx_val.second * beta[t][j];
+		}
+		value_t sum1 = 0;
+		for(int i = 0;i < n;++i){
+			value_t diff = y[i] - xb_sum[i];
+			sum1 += diff * diff;
+		}
+		return sum1 / (2 * n) + lambda * sumb;
+	}
+
+	double dual(){
+		value_t sum2 = 0;
+		for(int i = 0;i < n;++i){
+			value_t diff2 = y[i] / lambda / n - theta[i];
+			//if(fabs(diff2) > 1e30)
+			//	Logger::log(Logger::DEBUG,"diff2 %e\n",diff2);
+			sum2 += diff2 * diff2;
+		}
+		Logger::log(Logger::DEBUG,"sum2 in dual %e\n",sum2);
+		return sq_norm_2_y_div_2n - n * lambda * lambda / 2 * sum2;
+	}
+	
+	double dual(std::vector<value_t>& r){
+		std::vector<value_t>& theta = lc_theta;
+		for(int i = 0;i < n;++i)
+			theta[i] = r[i] / lambda / n;
+		//for(int i = 0;i < lc_theta.size();++i)
+		//	Logger::log(Logger::DEBUG,"%d %e\n",i,r[i]);
+		auto s = return_s(A);
+		Logger::log(Logger::DEBUG,"accel s %f\n",s);
+		if(s < 1)
+			s = 1;
+		Logger::log(Logger::DEBUG,"accel s %f\n",s);
+		for(int i = 0;i < n;++i){
+			theta[i] /= s;
+		//	Logger::log(Logger::DEBUG,"theta[%d] %e\n",i,theta[i]);
+		}
+		value_t sum2 = 0;
+		for(int i = 0;i < n;++i){
+			value_t diff2 = y[i] / lambda / n - theta[i];
+			//if(fabs(diff2) > 1e30)
+			//	Logger::log(Logger::DEBUG,"diff2 %e\n",diff2);
+			sum2 += diff2 * diff2;
+		}
+		Logger::log(Logger::DEBUG,"sum2 in accel dual %e\n",sum2);
+		return sq_norm_2_y_div_2n - n * lambda * lambda / 2 * sum2;
+	}
+
+	std::vector<value_t> linear_system_dual(){
+		std::vector<value_t> ret(n,0);
+		Eigen::MatrixXd UTU(k, k);
+		Eigen::VectorXd v(k);
+		for(int i = 0;i < k;++i)
+			v(i) = 1;
+		for(int i = 0;i < k;++i)
+			for(int j = 0;j <= i;++j){
+				value_t tmp = 0;
+				for(int d = 0;d < n;++d){
+					tmp += (past_r[i + 1][d] - past_r[i][d]) * (past_r[j + 1][d] - past_r[j][d]);
+				}
+				UTU(i,j) = UTU(j,i) = tmp;
+			}
+		//std::cout << UTU << std::endl;
+		//std::cout << std::endl << v << std::endl;
+		Eigen::VectorXd c = UTU.householderQr().solve(v);
+		//std::cout << std::endl << c << std::endl;
+		value_t sum = 0;
+		for(int i = 0;i < k;++i){
+	//		Logger::log(Logger::DEBUG,"c[%d] %e\n",i,c(i));
+			sum += c(i);
+		}
+		for(int i = 0;i < k;++i){
+			for(int j = 0;j < n;++j)
+				ret[j] += c(i) / sum * past_r[k - i][j];
+		}
+		return ret;
+	}
+
+	value_t gap(){
+		auto p = prime();
+		auto d = dual();
+
+		std::vector<value_t> r_accel = linear_system_dual();
+		value_t lc_d = dual(r_accel);
+		Logger::log(Logger::DEBUG,"dural(r) vs dual(r_accel)! (%e vs %e)\n",d,lc_d);
+		Logger::log(Logger::DEBUG,"old %e new %e\n",p - d,p - lc_d);
+		//if(1 < 0 && d < lc_d && p - lc_d >= 0){
+		//if(d < lc_d && p - lc_d >= 0){
+		if(d < lc_d){
+			Logger::log(Logger::DEBUG,"update r by r_accel! (%e vs %e)\n",d,lc_d);
+			d = lc_d;
+		}
+
+		Logger::log(Logger::DEBUG,"%e %e\n",p,d);
+		
+		last_prime = p;
+		last_dual = d;
+
+		return p - d >= 0 ? p - d : d - p;
+		//return prime() - dual();
+	}
+
+	value_t update_xTtheta_return_s(std::unordered_set<int>& col_set){
+		value_t ret = 0;
+		for(int j : col_set){
+			value_t sum = 0;
+			for(auto& idx_val : col_x[j]){
+				value_t tmp = idx_val.second * theta[idx_val.first];
+				sum += tmp;
+			}
+			ret = std::max(ret,fabs(sum));
+			xTtheta[j] = sum;
+		}
+		return ret;
+	}
+	
+	value_t return_s(std::unordered_set<int>& col_set){
+		value_t ret = 0;
+		for(int j : col_set){
+			value_t sum = 0;
+			for(auto& idx_val : col_x[j]){
+				value_t tmp = idx_val.second * theta[idx_val.first];
+				sum += tmp;
+			}
+			ret = std::max(ret,fabs(sum));
+		}
+		return ret;
+	}
+
+	void update_theta(){
+		for(int i = 0;i < n;++i)
+			theta[i] = r[i] / lambda / n;
+		//for(int i = 0;i < n;++i){
+		//	Logger::log(Logger::DEBUG,"r[%d] %e\n",i,r[i]);
+		//}
+		auto s = update_xTtheta_return_s(A);
+		Logger::log(Logger::DEBUG,"s %f\n",s);
+		for(int i = 0;i < n;++i){
+			theta[i] /= s;
+		//	Logger::log(Logger::DEBUG,"theta[%d] %e\n",i,theta[i]);
+		}
+	}
+	
+
+	void rank_r(){
+		std::vector<int> perm;
+		perm.reserve(R1.size() + R2.size());
+		for(const auto& j : R1)
+			perm.push_back(j);
+		for(const auto& j : R2)
+			perm.push_back(j);
+		std::sort(perm.begin(),perm.end(),[&](int a,int b){return (1-fabs(xTtheta[a]))/sqrt(x_sq_norm_2[a]) < (1-fabs(xTtheta[b]))/sqrt(x_sq_norm_2[b]);});
+		R1.clear();
+		R2.clear();
+		//int r1_end = r1_ratio * perm.size();
+		int r1_end = r1_ratio * A.size();
+        if(r1_end >= perm.size())
+            r1_end = perm.size();
+		for(int i = 0;i < r1_end;++i)
+			R1.insert(perm[i]);
+		for(int i = r1_end;i < perm.size();++i)
+			R2.insert(perm[i]);
+	}
+	
+	void print_iter_end_report(int iter){
+		Logger::log(Logger::DEBUG,"%d: after subproblem A %zu R1 %zu R2 %zu\n",iter,A.size(),R1.size(),R2.size());
+	}
+
+	void spin(){
+		auto spin_begin = std::chrono::steady_clock::now();
+		const int max_iteration = 10000000;
+		int last_rank_iter = -1;
+		for(int iter = 0;iter < max_iteration;++iter){
+			Logger::log(Logger::DEBUG,"using A:");
+			for(auto j : A)
+				Logger::log_pure(Logger::DEBUG," %d",j);
+			Logger::log_pure(Logger::DEBUG,"\n");
+			subproblem_solver();
+			update_theta();
+			update_xTtheta_return_s(A);
+			value_t g = gap();	
+			Logger::log(Logger::DEBUG,"iter %d\t| gap %e\n",iter,g);
+			if(stop_adding && g < epsilon)
+				break;
+			auto del_candidates = del(g);
+			bool touch_s_r2 = false;	
+			if(!stop_adding){
+				value_t s_r1 = update_xTtheta_return_s(R1);
+				Logger::log(Logger::DEBUG,"s_r1 %e\n",s_r1);
+				if(s_r1 < 1){
+					touch_s_r2 = true;
+					value_t s_r2 = update_xTtheta_return_s(R2);
+					Logger::log(Logger::DEBUG,"s_r2 %e\n",s_r2);
+					if(s_r2 < 1){
+						stop_adding = true;
+						Logger::log(Logger::DEBUG,"now we stop_adding\n");
+					}
+				}
+			}
+			if(!stop_adding){
+#if FIX_ADD == 0
+				int add_cnt = (A.size() - del_candidates.size()) * ADD_B;
+#else
+				int add_cnt = ADD_B;
+#endif
+				Logger::log(Logger::DEBUG,"add_cnt %d\n",add_cnt);
+				if(A.size() + add_cnt < LEAST_A_SIZE)
+					add_cnt = LEAST_A_SIZE - A.size();
+				if(add_cnt < 10)
+					add_cnt = LEAST_A_SIZE;
+				Logger::log(Logger::DEBUG,"add_cnt is modified to %d (%d - %zu)\n",add_cnt,LEAST_A_SIZE,A.size());
+				auto add_candidates = add(add_cnt,g);
+				Logger::log(Logger::DEBUG,"add candidate %zu\n",add_candidates.size());
+				for(const auto& i : add_candidates){
+					A.insert(i);
+					R1.erase(i);
+				}
+				total_add_cnt += add_candidates.size();
+			}
+			for(const auto& i : del_candidates){
+				A.erase(i);
+				R1.insert(i);
+			}
+			total_del_cnt += del_candidates.size();
+			if(( (iter - last_rank_iter) == m2  || R1.size() == 0) && stop_adding == false){
+				if(touch_s_r2 == false)
+					update_xTtheta_return_s(R2);
+				rank_r();
+				last_rank_iter = iter;
+				++total_rank_cnt;
+			}
+			print_iter_end_report(iter);
+		}
+		auto spin_end = std::chrono::steady_clock::now();
+		spin_time = std::chrono::duration_cast<std::chrono::microseconds>(spin_end - spin_begin).count();
+		print_final_report();
+	}
+
+	void dump(std::string path){
+		FILE* fp = fopen(path.c_str(),"wb");
+		int zero_col = 0;
+		//for(int i = 0;i < p;++i)
+		//	if(col_x[i].size() < 3)
+		//		++zero_col;
+		idx_t real_col = p - zero_col;
+		fwrite(&n,sizeof(n),1,fp);
+		fwrite(&real_col,sizeof(real_col),1,fp);
+		fwrite(y.data(),sizeof(*y.begin()),y.size(),fp);
+	//	for(auto idx_val : col_x[0])
+	//		Logger::log(Logger::DEBUG,"in dump %d %e\n",idx_val.first,idx_val.second);
+		for(int i = 0;i < p;++i){
+			idx_t sz = col_x[i].size();
+		//	if(sz < 3) continue;
+			fwrite(&sz,sizeof(sz),1,fp);
+			fwrite(col_x[i].data(),sizeof(*col_x[i].begin()),col_x[i].size(),fp);
+		}
+		fclose(fp);
+	}
+	void load(std::string path){
+		FILE* fp = fopen(path.c_str(),"rb");
+		fread(&n,sizeof(n),1,fp);
+		fread(&p,sizeof(p),1,fp);
+		y.resize(n);
+		fread(y.data(),sizeof(*y.begin()),y.size(),fp);
+		col_x.resize(p);
+		for(int i = 0;i < p;++i){
+			idx_t sz = 0;
+			fread(&sz,sizeof(sz),1,fp);
+			col_x[i].resize(sz);
+			fread(col_x[i].data(),sizeof(*col_x[i].begin()),sz,fp);
+		}
+	//	for(auto idx_val : col_x[0])
+	//		Logger::log(Logger::DEBUG,"in load %d %e\n",idx_val.first,idx_val.second);
+		fclose(fp);
+		init(n,p);
+	}
+
+	void print_final_report(){
+		const int t = m1 & 1;
+		idx_t non_zero_beta = 0;
+		for(int i = 0;i < p;++i)
+			if(!is_zero(beta[t][i]))
+				++non_zero_beta;
+		Logger::log(Logger::INFO,"==========================\n");	
+		Logger::log(Logger::INFO,"||--------REPORT--------||\n");	
+		Logger::log(Logger::INFO,"==========================\n");	
+		Logger::log(Logger::INFO,"Non-zero beta:\t%d\n",non_zero_beta);	
+		Logger::log(Logger::INFO,"ADD count:    \t%d\n",total_add_cnt);	
+		Logger::log(Logger::INFO,"DEL count:    \t%d\n",total_del_cnt);	
+		Logger::log(Logger::INFO,"RANK_R count: \t%d\n",total_rank_cnt);	
+		Logger::log(Logger::INFO,"Prime: %e || Dual %e\n",last_prime,last_dual);	
+		Logger::log(Logger::INFO,"Gap: %e\n",last_prime - last_dual);	
+		Logger::log(Logger::INFO,"Time: %e seconds\n",spin_time / 1e6);	
+//		Logger::log(Logger::INFO,"Execution time (%.3f) --- load data(%.3f), compute(%.3f)\n",load_time + compute_time);
+	}
+};
+
