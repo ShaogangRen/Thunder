@@ -43,13 +43,17 @@ In scripts/, there are some example .sh files for the data sets.
 
 
 ### Compile the files
-Here is the comondlines to compile the code.
+The comond lines to compile the code.
 
 lassolver : lassolver.h main.cc parser.h
-	g++ main.cc -o lassolver -g -std=c++11 -O3 -I.
+'''
+g++ main.cc -o lassolver -g -std=c++11 -O3 -I.
+'''
 
 binary_dump_libsvm : lassolver.h binary_dump_libsvm.cc parser.h
-	g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
+'''
+g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
+'''
 
 
 
