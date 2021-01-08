@@ -11,8 +11,9 @@ binary_dump_libsvm is a program that converts the libsvm dataset
 into a binary file for fast loading of lassolver.
 
 Usage: 
-
+'''
 ./binary_dump_libsvm <n> <p> <input_libsvm_data> <output_binary_data>
+'''
  
 Example: ./binary_dump_libsvm 16087 1668738 myfinance.libsvm myfinance.bin
 
