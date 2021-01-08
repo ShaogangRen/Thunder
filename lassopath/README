@@ -1,0 +1,14 @@
+Lasso path code.
+
+Example cmd:
+ nohup sh  runall_url_lasso_path.sh > nohup_finance &
+
+
+========parameters in batch.sh ===
+epsilons: stopping duality gap
+r1_ratios: R1/R2  ratio
+m1: K1
+m2: K2
+fix_adds:  0, add feature based on A's size; 1 add a fixed number of features
+add_bs: the value associates 'fix_adds'
+
