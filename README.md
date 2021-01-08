@@ -32,9 +32,9 @@ Example cmd:
 
 ## Run the code
 
-The scripts can compile the files and then run the code.
+The scripts can automatically compile the files and then run the code.
 
-### Run the code
+### Steps to run the code
 1. Download a bin file from [1] and put it in the code directory.
 
 2. run  sh  ./runall_*.sh.  Example: sh ./runall_finance.sh
@@ -56,7 +56,6 @@ binary_dump_libsvm : lassolver.h binary_dump_libsvm.cc parser.h
 ```
 g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
 ```
-
 
 
 ## Citation
