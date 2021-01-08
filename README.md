@@ -29,13 +29,10 @@ run_all.sh simplely specifies the two inputs mentioned above for batch.sh.
 Example cmd:
  nohup sh  runall_finance.sh > nohup_finance &
 
-### Compile the code
-lassolver : lassolver.h main.cc parser.h
-	g++ main.cc -o lassolver -g -std=c++11 -O3 -I.
 
-binary_dump_libsvm : lassolver.h binary_dump_libsvm.cc parser.h
-	g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
+## Run the code
 
+The scripts can compile the files and then run the code.
 
 ### Run the code
 1. Download a bin file from [1] and put it in the code directory.
@@ -43,6 +40,17 @@ binary_dump_libsvm : lassolver.h binary_dump_libsvm.cc parser.h
 2. run  sh  ./runall_*.sh.  Example: sh ./runall_finance.sh
 
 In scripts/, there are some example .sh files for the data sets.
+
+
+### Compile the files
+Here is the comondlines to compile the code.
+
+lassolver : lassolver.h main.cc parser.h
+	g++ main.cc -o lassolver -g -std=c++11 -O3 -I.
+
+binary_dump_libsvm : lassolver.h binary_dump_libsvm.cc parser.h
+	g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
+
 
 
 ## Citation
