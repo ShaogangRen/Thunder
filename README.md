@@ -68,7 +68,7 @@ g++ binary_dump_libsvm.cc -o binary_dump_libsvm -g -std=c++11 -O3 -I.
 
 
 ## Citation
-If you use the code in your research, please cite our  paper:
+The code can only be used for research purpose. If the code is useful in your research, please cite our  paper:
 ```
 @article{ren2020thunder,
   title={Thunder: a Fast Coordinate Selection Solver for Sparse Learning},
