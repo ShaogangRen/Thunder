@@ -17,7 +17,7 @@ Usage:
  
 Example: 
 ```
-./binary_dump_libsvm 16087 1668738 myfinance.libsvm myfinance.bin
+./binary_dump_libsvm 16087 1668738 finance.libsvm finance.bin
 ```
 
 Processed bin files are avarilable at
