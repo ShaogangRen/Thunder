@@ -44,9 +44,19 @@ Example cmd:
 The scripts can automatically compile the files and then run the code.
 
 ### Steps to run the code
+```
 1. Download a bin file from [1] and put it in the code directory.
 
 2. run  sh  ./runall_*.sh.  Example: sh ./runall_finance.sh
+```
+
+Or convert a libsvm file to a bin file 
+
+```
+1. ./binary_dump_libsvm <n> <p> <input_libsvm_data> <output_binary_data>
+
+2. run  sh  ./runall_*.sh.  Example: sh ./runall_finance.sh
+```
 
 In scripts/, there are some example .sh files for the data sets.
 
