@@ -20,7 +20,7 @@ Example:
 ./binary_dump_libsvm 16087 1668738 finance.libsvm finance.bin
 ```
 
-Processed bin files are avarilable at
+Processed bin files are available at
 [1]https://drive.google.com/drive/folders/1SohTz5Fa8DFNH7LgGFUJ4PxnWaqNdVLX?usp=sharing
 
 Please read run_all.sh and batch.sh for more details.
